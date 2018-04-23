@@ -187,7 +187,7 @@ def hog(image, N_theta=9, N_p=5,
 if __name__ == "__main__":
     # img = rgb2gray(data.lena())
     img = rgb2gray(data.astronaut())
-
+    print(type(img))
 
     fd, hog_img = hog(img, N_theta=9, N_p=5, N_c=3, visualise=True)
 
