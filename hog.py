@@ -1,13 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from skimage import draw
+from skimage import data, exposure
 from skimage.color import rgb2gray
-from scipy import misc
 from scipy import sqrt, pi, arctan2, cos, sin
 from scipy.ndimage import uniform_filter
 
-def hog(image, orientations=9, pixels_per_cell=(8, 8),
-        cells_per_block=(3, 3), visualise=False, normalise=False):
+
+def hog(image, N_theta=9, N_p=5,
+        N_c=3, visualise=False):
     """Extract Histogram of Oriented Gradients (HOG) for a given image.
 
     Compute a Histogram of Oriented Gradients (HOG) by
@@ -22,17 +22,14 @@ def hog(image, orientations=9, pixels_per_cell=(8, 8),
     ----------
     image : (M, N) ndarray
         Input image (greyscale).
-    orientations : int
+    N_theta : int
         Number of orientation bins.
-    pixels_per_cell : 2 tuple (int, int)
+    N_p : int
         Size (in pixels) of a cell.
-    cells_per_block  : 2 tuple (int,int)
+    N_c  : 2 tuple (int,int)
         Number of cells in each block.
     visualise : bool, optional
         Also return an image of the HOG.
-    normalise : bool, optional
-        Apply power law compression to normalise the image before
-        processing.
 
     Returns
     -------
@@ -62,11 +59,8 @@ def hog(image, orientations=9, pixels_per_cell=(8, 8),
     shadowing and illumination variations.
     """
 
-    if image.ndim > 3:
+    if image.ndim > 2:
         raise ValueError("Currently only supports grey-level images")
-
-    if normalise:
-        image = sqrt(image)
 
     """
     The second stage computes first order image gradients. These capture
@@ -77,6 +71,11 @@ def hog(image, orientations=9, pixels_per_cell=(8, 8),
     which act as primitive bar detectors - a useful feature for capturing,
     e.g. bar like structures in bicycles and limbs in humans.
     """
+
+    if image.dtype.kind == 'u':
+        # convert uint image to float
+        # to avoid problems with subtracting unsigned numbers in np.diff()
+        image = image.astype('float')
 
     gx = np.zeros(image.shape)
     gy = np.zeros(image.shape)
@@ -90,7 +89,7 @@ def hog(image, orientations=9, pixels_per_cell=(8, 8),
     information locally in the same way as the SIFT [Lowe 2004]
     feature. The image window is divided into small spatial regions,
     called "cells". For each cell we accumulate a local 1-D histogram
-    of gradient or edge orientations over all the pixels in the
+    of gradient or edge N_theta over all the pixels in the
     cell. This combined cell-level 1-D histogram forms the basic
     "orientation histogram" representation. Each orientation histogram
     divides the gradient angle range into a fixed number of
@@ -98,52 +97,54 @@ def hog(image, orientations=9, pixels_per_cell=(8, 8),
     cell are used to vote into the orientation histogram.
     """
 
-    magnitude = sqrt(gx ** 2 + gy ** 2)
-    orientation = arctan2(gy, (gx + 1e-15)) * (180 / pi) + 90
+    magnitude = sqrt(gx**2 + gy**2) # TODO
+    orientation = arctan2(gy, gx + 1e-15) * (180 / pi) % 180
 
-    sx, sy = image.shape
-    cx, cy = pixels_per_cell
-    bx, by = cells_per_block
+    sy, sx = image.shape
+    cx, cy = N_p, N_p
+    bx, by = N_c, N_c
 
     n_cellsx = int(np.floor(sx // cx))  # number of cells in x
     n_cellsy = int(np.floor(sy // cy))  # number of cells in y
 
-    # compute orientations integral images
-    orientation_histogram = np.zeros((n_cellsx, n_cellsy, orientations))
-    for i in range(orientations):
-        #create new integral image for this orientation
-        # isolate orientations in this range
+    # compute N_theta integral images
+    orientation_histogram = np.zeros((n_cellsy, n_cellsx, N_theta))
+    subsample = np.index_exp[cy // 2:cy * n_cellsy:cy,
+                             cx // 2:cx * n_cellsx:cx]
+    for i in range(N_theta):
+        # create new integral image for this orientation
+        # isolate N_theta in this range
 
-        temp_ori = np.where(orientation < 180 / orientations * (i + 1),
-                            orientation, 0)
-        temp_ori = np.where(orientation >= 180 / orientations * i,
-                            temp_ori, 0)
-        # select magnitudes for those orientations
-        cond2 = temp_ori > 0
+        temp_ori = np.where(orientation < 180.0 / N_theta * (i + 1),
+                            orientation, -1)
+        temp_ori = np.where(orientation >= 180.0 / N_theta * i,
+                            temp_ori, -1)
+        # select magnitudes for those N_theta
+        cond2 = temp_ori > -1
         temp_mag = np.where(cond2, magnitude, 0)
 
-        orientation_histogram[:,:,i] = uniform_filter(temp_mag, size=(cx, cy))[cx//2::cx, cy//2::cy].T
-
+        temp_filt = uniform_filter(temp_mag, size=(cy, cx))
+        orientation_histogram[:, :, i] = temp_filt[subsample]
 
     # now for each cell, compute the histogram
-    #orientation_histogram = np.zeros((n_cellsx, n_cellsy, orientations))
-
-    radius = min(cx, cy) // 2 - 1
     hog_image = None
-    if visualise:
-        hog_image = np.zeros((sy, sx), dtype=float)
 
     if visualise:
-        
+        from skimage import draw
+
+        radius = min(cx, cy) // 2 - 1
+        hog_image = np.zeros((sy, sx), dtype=float)
         for x in range(n_cellsx):
             for y in range(n_cellsy):
-                for o in range(orientations):
+                for o in range(N_theta):
                     centre = tuple([y * cy + cy // 2, x * cx + cx // 2])
-                    dx = radius * cos(float(o) / orientations * np.pi)
-                    dy = radius * sin(float(o) / orientations * np.pi)
-                    rr, cc = draw.bresenham(centre[0] - dx, centre[1] - dy,
-                                            centre[0] + dx, centre[1] + dy)
-                    hog_image[rr, cc] += orientation_histogram[x, y, o]
+                    dx = radius * cos(float(o) / N_theta * np.pi)
+                    dy = radius * sin(float(o) / N_theta * np.pi)
+                    rr, cc = draw.line(int(centre[0] - dx),
+                                       int(centre[1] - dy),
+                                       int(centre[0] + dx),
+                                       int(centre[1] + dy))
+                    hog_image[rr, cc] += orientation_histogram[y, x, o]
 
     """
     The fourth stage computes normalisation, which takes local groups of
@@ -162,14 +163,14 @@ def hog(image, orientations=9, pixels_per_cell=(8, 8),
 
     n_blocksx = (n_cellsx - bx) + 1
     n_blocksy = (n_cellsy - by) + 1
-    normalised_blocks = np.zeros((n_blocksx, n_blocksy,
-                                  bx, by, orientations))
+    normalised_blocks = np.zeros((n_blocksy, n_blocksx,
+                                  by, bx, N_theta))
 
     for x in range(n_blocksx):
         for y in range(n_blocksy):
-            block = orientation_histogram[x:x + bx, y:y + by, :]
+            block = orientation_histogram[y:y + by, x:x + bx, :]
             eps = 1e-5
-            normalised_blocks[x, y, :] = block / sqrt(block.sum() ** 2 + eps)
+            normalised_blocks[y, x, :] = block / sqrt(block.sum()**2 + eps) # TODO
 
     """
     The final step collects the HOG descriptors from all blocks of a dense
@@ -182,13 +183,24 @@ def hog(image, orientations=9, pixels_per_cell=(8, 8),
     else:
         return normalised_blocks.ravel()
 
+
 if __name__ == "__main__":
-    image = misc.face()
-    gray_image = rgb2gray(image)
-    print(image.shape)
-    hog_feature, hog_image = hog(gray_image, visualise=True)
-    plt.subplot(1, 2, 1)
-    plt.imshow(image)
-    plt.subplot(1, 2, 2)
-    plt.imshow(hog_image)
+    # img = rgb2gray(data.lena())
+    img = rgb2gray(data.astronaut())
+
+
+    fd, hog_img = hog(img, N_theta=9, N_p=5, N_c=3, visualise=True)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
+
+    ax1.axis('off')
+    ax1.imshow(img, cmap=plt.cm.gray)
+    ax1.set_title('Input image')
+
+    # Rescale histogram for better display
+    hog_image_rescaled = exposure.rescale_intensity(hog_img, in_range=(0, 10))
+
+    ax2.axis('off')
+    ax2.imshow(hog_image_rescaled, cmap=plt.cm.gray)
+    ax2.set_title('Histogram of Oriented Gradients')
     plt.show()
