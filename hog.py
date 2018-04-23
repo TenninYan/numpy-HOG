@@ -1,4 +1,8 @@
 import numpy as np
+import matplotlib.pyplot as plt
+from skimage import draw
+from skimage.color import rgb2gray
+from scipy import misc
 from scipy import sqrt, pi, arctan2, cos, sin
 from scipy.ndimage import uniform_filter
 
@@ -118,7 +122,7 @@ def hog(image, orientations=9, pixels_per_cell=(8, 8),
         cond2 = temp_ori > 0
         temp_mag = np.where(cond2, magnitude, 0)
 
-        orientation_histogram[:,:,i] = uniform_filter(temp_mag, size=(cx, cy))[cx/2::cx, cy/2::cy].T
+        orientation_histogram[:,:,i] = uniform_filter(temp_mag, size=(cx, cy))[cx//2::cx, cy//2::cy].T
 
 
     # now for each cell, compute the histogram
@@ -130,7 +134,6 @@ def hog(image, orientations=9, pixels_per_cell=(8, 8),
         hog_image = np.zeros((sy, sx), dtype=float)
 
     if visualise:
-        from skimage import draw
         
         for x in range(n_cellsx):
             for y in range(n_cellsy):
@@ -178,3 +181,14 @@ def hog(image, orientations=9, pixels_per_cell=(8, 8),
         return normalised_blocks.ravel(), hog_image
     else:
         return normalised_blocks.ravel()
+
+if __name__ == "__main__":
+    image = misc.face()
+    gray_image = rgb2gray(image)
+    print(image.shape)
+    hog_feature, hog_image = hog(gray_image, visualise=True)
+    plt.subplot(1, 2, 1)
+    plt.imshow(image)
+    plt.subplot(1, 2, 2)
+    plt.imshow(hog_image)
+    plt.show()
