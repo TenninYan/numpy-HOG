@@ -98,7 +98,7 @@ def hog(image, N_theta=9, N_p=5,
     """
 
     magnitude = sqrt(gx**2 + gy**2) # TODO
-    orientation = arctan2(gy, gx + 1e-15) * (180 / pi) % 180
+    orientation = arctan2(gy, gx) * (180 / pi) % 180 # TODO
 
     sy, sx = image.shape
     cx, cy = N_p, N_p
